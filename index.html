@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Обработка текста</title>
+<style>
+:root{--bg:#f3f5f2;--card:#fff;--ink:#1d2a24;--mute:#66746d;--line:#cfd8d2;--acc:#1f6f4a;--accink:#fff;--hl:#ffe08a;--err:#a3321f;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121815;--card:#1b241f;--ink:#e6efe9;--mute:#93a39a;--line:#33423a;--acc:#4fc58a;--accink:#08140e;--hl:#6b5a1a;--err:#ff9b86}}
+:root[data-theme="dark"]{--bg:#121815;--card:#1b241f;--ink:#e6efe9;--mute:#93a39a;--line:#33423a;--acc:#4fc58a;--accink:#08140e;--hl:#6b5a1a;--err:#ff9b86}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Segoe UI",Roboto,system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.6rem;margin:0 0 4px}
+p.s{color:var(--mute);margin:0 0 16px}
+.tabs{display:flex;gap:8px;margin:8px 0 14px}
+.tabs button{flex:1;background:var(--card);color:var(--ink);border:1px solid var(--line)}
+.tabs button[aria-pressed="true"]{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+textarea{width:100%;min-height:150px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;resize:vertical}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.opts{margin:12px 0}
+.opts label{display:flex;gap:10px;align-items:flex-start}
+.opts input{margin-top:5px;width:18px;height:18px;accent-color:var(--acc)}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+button{padding:12px 18px;border-radius:8px;border:1px solid var(--acc);background:var(--acc);color:var(--accink);font:inherit;font-weight:600;cursor:pointer}
+button.g{background:transparent;color:var(--ink);border-color:var(--line)}
+.m{color:var(--mute)}
+label.t{display:block;font-weight:600;margin:14px 0 6px}
+#view{padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--card);white-space:pre-wrap;word-break:break-word;min-height:60px}
+mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 1px}
+.pick{display:block;border:2px dashed var(--line);border-radius:10px;padding:26px 16px;text-align:center;background:var(--card);cursor:pointer;font-weight:600}
+.pick:focus-within{outline:3px solid var(--acc);outline-offset:2px}
+.pick input{position:absolute;opacity:0;width:1px;height:1px}
+.pick small{display:block;color:var(--mute);font-weight:400;margin-top:4px}
+.item{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:12px;margin-top:10px}
+.item b{word-break:break-all}
+.item .e{color:var(--err)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>✨ Обработка текста 📝</h1>
+<p class="s">Вставь текст или выбери файл, и получишь обработанный результат. 🚀 Работает и с текстом, и с файлами.</p>
+
+<div class="tabs" role="group" aria-label="Режим">
+<button id="tText" aria-pressed="true">📝 Текст</button>
+<button id="tFile" aria-pressed="false">📄 Файл</button>
+</div>
+
+<section id="pText">
+<label class="t" for="in">Твой текст ✍️</label>
+<textarea id="in" placeholder="Вставь сюда текст…"></textarea>
+<div class="row">
+<button id="copy">📋 Копировать</button>
+<button id="clear" class="g">🧹 Очистить</button>
+</div>
+<div id="info" class="m" aria-live="polite"></div>
+<label class="t">Результат 🟢</label>
+<div id="view"></div>
+</section>
+
+<section id="pFile" hidden>
+<label class="pick" id="drop">
+<input type="file" id="f" multiple accept=".docx,.pptx,.xlsx,.pdf">
+📂 Выбрать файлы
+<small>Word (.docx), PowerPoint (.pptx), Excel (.xlsx). Можно несколько сразу или перетащить сюда</small>
+</label>
+<div id="list"></div>
+</section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+var BASE = {
+ "А":"A","В":"B","Е":"E","К":"K","М":"M","Н":"H","О":"O","Р":"P","С":"C","Т":"T","Х":"X","І":"I","Ѕ":"S","Ј":"J",
+ "а":"a","е":"e","о":"o","р":"p","с":"c","у":"y","х":"x","і":"i","ѕ":"s","ј":"j"
+};
+var TEXT_RE = /(<(?:w:t|w:delText|a:t)(?:\s[^>]*)?>)([\s\S]*?)(<\/(?:w:t|w:delText|a:t)>)/g;
+var XLSX_RE = /(<t(?:\s[^>]*)?>)([\s\S]*?)(<\/t>)/g;
+var $ = function(id){ return document.getElementById(id); };
+
+function getTable(rev){
+  var m = {}, k;
+  for(k in BASE){ if(rev){ if(!m[BASE[k]]) m[BASE[k]] = k; } else m[k] = BASE[k]; }
+  return m;
+}
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function has(t, ch){ return Object.prototype.hasOwnProperty.call(t, ch); }
+
+/* ---------- Режимы ---------- */
+function setMode(file){
+  $("pText").hidden = file; $("pFile").hidden = !file;
+  $("tText").setAttribute("aria-pressed", String(!file));
+  $("tFile").setAttribute("aria-pressed", String(file));
+}
+$("tText").onclick = function(){ setMode(false); };
+$("tFile").onclick = function(){ setMode(true); };
+
+/* ---------- Текст ---------- */
+var out = "";
+function runText(){
+  var text = $("in").value, t = getTable(false), html = "", plain = "", n = 0;
+  for(var ch of text){
+    if(has(t, ch)){ html += "<mark>" + esc(t[ch]) + "</mark>"; plain += t[ch]; n++; }
+    else { html += esc(ch); plain += ch; }
+  }
+  out = plain; $("view").innerHTML = html;
+  $("info").textContent = text ? ("Готово ✅") : "";
+}
+function copyOut(){
+  var info = $("info");
+  if(!out) runText();
+  function fb(){
+    var ta = document.createElement("textarea"); ta.value = out; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); info.textContent = "Скопировано 📋"; }catch(e){ info.textContent = "Не вышло, выдели текст вручную"; }
+    document.body.removeChild(ta);
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(out).then(function(){ info.textContent = "Скопировано 📋"; }, fb);
+  } else fb();
+}
+$("in").oninput = runText;
+$("copy").onclick = copyOut;
+$("clear").onclick = function(){ $("in").value = ""; out = ""; $("view").innerHTML = ""; $("info").textContent = ""; };
+
+/* ---------- Файлы ---------- */
+async function convert(file, rev){
+  var name = file.name, dot = name.lastIndexOf("."), ext = dot < 0 ? "" : name.slice(dot).toLowerCase();
+  if(ext === ".pdf") throw new Error("PDF так обработать нельзя: текст в нём закодирован. Выделенный из PDF текст можно вставить во вкладку «Текст», либо сохрани PDF как Word (.docx) и кинь сюда его.");
+  if([".docx",".pptx",".xlsx"].indexOf(ext) < 0) throw new Error("Подходят только .docx, .pptx и .xlsx");
+  if(typeof JSZip === "undefined") throw new Error("Не загрузилась библиотека. Проверь интернет и обнови страницу.");
+  var table = getTable(rev), count = 0, tasks = [];
+  var zip = await JSZip.loadAsync(await file.arrayBuffer());
+  zip.forEach(function(path, entry){
+    var rx = null;
+    if(entry.dir || !/\.xml$/.test(path)) return;
+    if(ext === ".docx" && path.indexOf("word/") === 0) rx = TEXT_RE;
+    else if(ext === ".pptx" && path.indexOf("ppt/") === 0) rx = TEXT_RE;
+    else if(ext === ".xlsx" && path === "xl/sharedStrings.xml") rx = XLSX_RE;
+    if(!rx) return;
+    tasks.push(entry.async("string").then(function(xml){
+      zip.file(path, xml.replace(rx, function(_, a, text, c){
+        var r = "";
+        for(var ch of text){ if(has(table, ch)){ r += table[ch]; count++; } else r += ch; }
+        return a + r + c;
+      }));
+    }));
+  });
+  await Promise.all(tasks);
+  var blob = await zip.generateAsync({type:"blob", compression:"DEFLATE"});
+  return {blob: blob, count: count, outName: name.slice(0, dot) + "_fixed" + ext};
+}
+
+async function saveBlob(res, info){
+  var dl = null;
+  try{ dl = (window.claude && window.claude.use) ? await window.claude.use("downloads") : null; }catch(e){ dl = null; }
+  if(dl){
+    try{ await dl.save({filename: res.outName, data: res.blob}); info.textContent = "Сохранено 💾 " + res.outName; }
+    catch(e){ info.textContent = (e && e.code === "declined") ? "Сохранение отменено" : "Не получилось сохранить: " + ((e && e.message) || e); }
+    return;
+  }
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(res.blob); a.download = res.outName;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  info.textContent = "Скачивание запущено 💾 " + res.outName;
+}
+
+var lastFiles = [];
+async function handle(files){
+  var list = $("list"), rev = false;
+  list.innerHTML = "";
+  for(var i = 0; i < files.length; i++){
+    var f = files[i], box = document.createElement("div");
+    box.className = "item"; box.innerHTML = "<b>📄 " + esc(f.name) + "</b>";
+    list.appendChild(box);
+    try{
+      var res = await convert(f, rev);
+      var m = document.createElement("div"); m.className = "m"; m.textContent = "Готово ✅";
+      var btn = document.createElement("button"); btn.textContent = "💾 Сохранить " + res.outName;
+      var info = document.createElement("div"); info.className = "m";
+      btn.onclick = (function(r, inf){ return function(){ saveBlob(r, inf); }; })(res, info);
+      box.appendChild(m); box.appendChild(btn); box.appendChild(info);
+    }catch(e){
+      var er = document.createElement("div"); er.className = "e"; er.textContent = "⚠️ " + (e.message || String(e));
+      box.appendChild(er);
+    }
+  }
+}
+$("f").onchange = function(){ lastFiles = Array.prototype.slice.call($("f").files); handle(lastFiles); };
+$("drop").ondragover = function(e){ e.preventDefault(); };
+$("drop").ondrop = function(e){ e.preventDefault(); lastFiles = Array.prototype.slice.call(e.dataTransfer.files); handle(lastFiles); };
+</script>
+</body>
+</html>
